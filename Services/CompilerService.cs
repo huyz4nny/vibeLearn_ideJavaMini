@@ -71,8 +71,9 @@ namespace JavaIdeMini.Services
                         Directory.CreateDirectory(parentDir);
                     }
 
-                    // Ghi nội dung file
-                    await File.WriteAllTextAsync(fullFilePath, file.Content, Encoding.UTF8);
+                    // Ghi nội dung file (sử dụng UTF-8 không có BOM để tránh lỗi tương thích của Java compiler)
+                    var utf8WithoutBom = new UTF8Encoding(false);
+                    await File.WriteAllTextAsync(fullFilePath, file.Content, utf8WithoutBom);
                     
                     // Thêm vào danh sách file biên dịch
                     sourceFiles.Add(normalizedPath);
@@ -88,9 +89,9 @@ namespace JavaIdeMini.Services
                     };
                 }
 
-                // 3. Tạo file sources.txt ghi danh sách các file cần compile (để tránh lỗi command line quá dài trên Windows)
+                // 3. Tạo file sources.txt ghi danh sách các file cần compile (sử dụng UTF-8 không BOM để tránh lỗi của javac)
                 var sourcesTxtPath = Path.Combine(tempDir, "sources.txt");
-                await File.WriteAllLinesAsync(sourcesTxtPath, sourceFiles, Encoding.UTF8);
+                await File.WriteAllLinesAsync(sourcesTxtPath, sourceFiles, new UTF8Encoding(false));
 
                 // 4. Gọi trình biên dịch javac
                 var javacStartInfo = new ProcessStartInfo
