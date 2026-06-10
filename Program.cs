@@ -102,20 +102,33 @@ app.MapPost("/api/run", async (
         return Results.Json(new { message = "Yêu cầu đăng nhập." }, statusCode: StatusCodes.Status401Unauthorized);
     }
 
-    if (string.IsNullOrWhiteSpace(request.Code))
+    List<JavaFile> filesToCompile = new();
+    if (request.Files != null && request.Files.Count > 0)
+    {
+        filesToCompile = request.Files;
+    }
+    else if (!string.IsNullOrWhiteSpace(request.Code))
+    {
+        filesToCompile.Add(new JavaFile { Path = "Main.java", Content = request.Code });
+    }
+
+    if (filesToCompile.Count == 0)
     {
         return Results.Json(new { message = "Mã nguồn không được để trống." }, statusCode: StatusCodes.Status400BadRequest);
     }
 
-    // Biên dịch và chạy code Java thông qua Piston API
-    var result = await compilerService.ExecuteJavaCodeAsync(request.Code);
+    // Biên dịch và chạy code Java thông qua Wandbox API
+    var result = await compilerService.ExecuteJavaCodeAsync(filesToCompile);
+
+    // Serialize danh sách file để lưu vào lịch sử chạy
+    string serializedCode = JsonSerializer.Serialize(filesToCompile);
 
     // Ghi nhận lịch sử chạy code vào database
     var runHistory = new RunHistory
     {
         UserId = userId,
         SnippetId = request.SnippetId,
-        Code = request.Code,
+        Code = serializedCode,
         Output = result.Output,
         Status = result.Success ? "success" : "error",
         DurationMs = result.DurationMs
@@ -148,7 +161,7 @@ app.Run();
 /// </summary>
 /// <remarks>
 /// 💡 **So sánh Java ↔ C#**:
-/// - Dòng code dưới đây sử dụng C# `record` type. Tương đương với `public record RunRequest(String code, Long snippetId) {}` 
+/// - Dòng code dưới đây sử dụng C# `record` type. Tương đương với `public record RunRequest(String code, List<JavaFile> files, Long snippetId) {}` 
 ///   được giới thiệu từ Java 14. Giúp định nghĩa nhanh cấu trúc dữ liệu bất biến (immutable data carrier) không có logic.
 /// </remarks>
-public record RunRequest(string Code, long? SnippetId);
+public record RunRequest(string? Code, List<JavaFile>? Files, long? SnippetId);

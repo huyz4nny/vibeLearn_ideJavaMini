@@ -161,6 +161,7 @@
                 
                 <!-- Textarea ẩn chứa code để submit form -->
                 <textarea name="code" id="hidden-code-area" class="hidden"></textarea>
+                <textarea id="hidden-project-data" class="hidden">@(Model.CurrentSnippet?.Code ?? Model.DefaultCode)</textarea>
             </form>
 
             <!-- Nút Hành Động -->
@@ -201,12 +202,12 @@
             </div>
         </div>
 
-        <!-- CENTER WORKSPACE: Monaco Editor -->
-        <div class="flex-grow relative min-h-[300px]">
+        <!-- CENTER WORKSPACE: Monaco Editor & Sidebar File Explorer -->
+        <div class="flex-grow flex relative min-h-[300px] overflow-hidden">
             @if (!isAuthenticated)
             {
                 <!-- Overlay cảnh báo nếu chưa đăng nhập -->
-                <div class="absolute inset-0 bg-gray-950/80 backdrop-blur-sm z-10 flex flex-col items-center justify-center p-6 text-center">
+                <div class="absolute inset-0 bg-gray-950/80 backdrop-blur-sm z-30 flex flex-col items-center justify-center p-6 text-center">
                     <div class="max-w-md space-y-4">
                         <div class="p-3 bg-violet-600/10 border border-violet-500/20 rounded-2xl w-14 h-14 flex items-center justify-center mx-auto mb-2 text-2xl">
                             🔒
@@ -220,7 +221,28 @@
                     </div>
                 </div>
             }
-            <div id="editor-container" class="absolute inset-0 w-full h-full"></div>
+            
+            <!-- Project File Explorer (Left Panel) -->
+            <div class="w-64 border-r border-gray-900 bg-gray-950/10 flex flex-col shrink-0">
+                <div class="p-3 border-b border-gray-900/60 flex items-center justify-between text-xs select-none">
+                    <span class="font-bold text-gray-400 uppercase tracking-wider text-[10px]">Tệp tin dự án (OOP)</span>
+                    @if (isAuthenticated)
+                    {
+                        <button onclick="addNewProjectFile()" class="p-1 hover:bg-gray-900 text-gray-400 hover:text-white rounded transition flex items-center justify-center w-5 h-5 font-bold" title="Tạo tệp Java mới">
+                            +
+                        </button>
+                    }
+                </div>
+                <!-- File list container -->
+                <div id="project-files-list" class="flex-grow overflow-y-auto p-2 space-y-1 select-none">
+                    <!-- Sẽ render động qua JS -->
+                </div>
+            </div>
+            
+            <!-- Editor (Right Panel) -->
+            <div class="flex-grow relative h-full">
+                <div id="editor-container" class="absolute inset-0 w-full h-full"></div>
+            </div>
         </div>
 
         <!-- BOTTOM TERMINAL: Simulating Terminal Output -->
@@ -253,7 +275,7 @@
     <!-- Loader CDN của Monaco Editor -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.39.0/min/vs/loader.min.js"></script>
     <script>
-        // Tab system logic
+        // Tab system logic (Sidebar)
         function switchTab(tabName) {
             const btnSnippets = document.getElementById('tab-btn-snippets');
             const btnHistory = document.getElementById('tab-btn-history');
@@ -261,15 +283,177 @@
             const tabHistory = document.getElementById('tab-history');
 
             if (tabName === 'snippets') {
-                btnSnippets.className = "flex-1 text-center py-2 text-xs font-bold rounded-lg bg-gray-900 text-white transition-all duration-300";
-                btnHistory.className = "flex-1 text-center py-2 text-xs font-bold rounded-lg text-gray-400 hover:text-gray-200 transition-all duration-300";
-                tabSnippets.classList.remove('hidden');
-                tabHistory.classList.add('hidden');
+                if (btnSnippets) btnSnippets.className = "flex-1 text-center py-2 text-xs font-bold rounded-lg bg-gray-900 text-white transition-all duration-300";
+                if (btnHistory) btnHistory.className = "flex-1 text-center py-2 text-xs font-bold rounded-lg text-gray-400 hover:text-gray-200 transition-all duration-300";
+                if (tabSnippets) tabSnippets.classList.remove('hidden');
+                if (tabHistory) tabHistory.classList.add('hidden');
             } else {
-                btnHistory.className = "flex-1 text-center py-2 text-xs font-bold rounded-lg bg-gray-900 text-white transition-all duration-300";
-                btnSnippets.className = "flex-1 text-center py-2 text-xs font-bold rounded-lg text-gray-400 hover:text-gray-200 transition-all duration-300";
-                tabHistory.classList.remove('hidden');
-                tabSnippets.classList.add('hidden');
+                if (btnHistory) btnHistory.className = "flex-1 text-center py-2 text-xs font-bold rounded-lg bg-gray-900 text-white transition-all duration-300";
+                if (btnSnippets) btnSnippets.className = "flex-1 text-center py-2 text-xs font-bold rounded-lg text-gray-400 hover:text-gray-200 transition-all duration-300";
+                if (tabHistory) tabHistory.classList.remove('hidden');
+                if (tabSnippets) tabSnippets.classList.add('hidden');
+            }
+        }
+
+        // Project files management
+        let projectFiles = [];
+        let activeFilePath = "Main.java";
+
+        // Initialize projectFiles from hidden textarea
+        try {
+            const rawData = document.getElementById('hidden-project-data').value;
+            projectFiles = JSON.parse(rawData);
+            activeFilePath = projectFiles[0]?.path || "Main.java";
+        } catch(e) {
+            projectFiles = [
+                { path: "Main.java", content: "public class Main {\n    public static void main(String[] args) {\n        System.out.println(\"Error loading code\");\n    }\n}" }
+            ];
+            activeFilePath = "Main.java";
+        }
+
+        // Render project file list
+        function renderFileList() {
+            const listContainer = document.getElementById('project-files-list');
+            if (!listContainer) return;
+            listContainer.innerHTML = '';
+            
+            projectFiles.forEach((file) => {
+                const isActive = file.path === activeFilePath;
+                
+                const item = document.createElement('div');
+                item.className = `group flex items-center justify-between p-2 rounded-xl cursor-pointer text-xs transition duration-150 border ${
+                    isActive 
+                        ? 'bg-violet-950/20 text-violet-400 border-violet-500/20 font-semibold' 
+                        : 'text-gray-400 hover:bg-gray-900/50 hover:text-gray-200 border-transparent'
+                }`;
+                item.setAttribute('onclick', `switchActiveFile("${file.path.replace(/"/g, '&quot;')}")`);
+                
+                const infoDiv = document.createElement('div');
+                infoDiv.className = 'flex items-center gap-2 truncate pr-2';
+                
+                const isSubfolder = file.path.includes('/');
+                const icon = isSubfolder ? '📂' : '📄';
+                
+                infoDiv.innerHTML = `<span>${icon}</span><span class="truncate" title="${file.path}">${file.path}</span>`;
+                item.appendChild(infoDiv);
+                
+                const isAuthed = @(isAuthenticated ? "true" : "false");
+                if (isAuthed && file.path !== 'Main.java') {
+                    const deleteBtn = document.createElement('button');
+                    deleteBtn.className = 'opacity-0 group-hover:opacity-100 p-0.5 hover:text-red-400 text-gray-500 rounded transition shrink-0 font-bold text-sm';
+                    deleteBtn.innerHTML = '×';
+                    deleteBtn.title = 'Xóa tệp';
+                    deleteBtn.onclick = (e) => {
+                        e.stopPropagation();
+                        deleteProjectFile(file.path);
+                    };
+                    item.appendChild(deleteBtn);
+                }
+                
+                listContainer.appendChild(item);
+            });
+        }
+
+        // Switch active file in Monaco
+        function switchActiveFile(newPath) {
+            if (newPath === activeFilePath) return;
+            
+            if (editor) {
+                const currentContent = editor.getValue();
+                const file = projectFiles.find(f => f.path === activeFilePath);
+                if (file) {
+                    file.content = currentContent;
+                }
+            }
+            
+            activeFilePath = newPath;
+            const newFile = projectFiles.find(f => f.path === activeFilePath);
+            if (newFile && editor) {
+                editor.setValue(newFile.content);
+            }
+            
+            renderFileList();
+        }
+
+        // Add new project file
+        function addNewProjectFile() {
+            const path = prompt("Nhập tên tệp Java mới (bao gồm cả package nếu muốn, ví dụ: animals/Dog.java hoặc MyHelper.java):");
+            if (!path) return;
+            
+            const trimmedPath = path.trim().replace(/\\/g, '/');
+            if (trimmedPath.length === 0) {
+                alert("Tên tệp không được trống.");
+                return;
+            }
+            if (!trimmedPath.endsWith('.java')) {
+                alert("Tệp phải có đuôi mở rộng là .java");
+                return;
+            }
+            if (trimmedPath === 'Main.java') {
+                alert("Tệp Main.java đã tồn tại làm tệp khởi chạy chính.");
+                return;
+            }
+            
+            if (projectFiles.some(f => f.path.toLowerCase() === trimmedPath.toLowerCase())) {
+                alert("Tệp này đã tồn tại trong dự án.");
+                return;
+            }
+            
+            // Generate basic template
+            let pkg = "";
+            let className = trimmedPath;
+            const lastSlash = trimmedPath.lastIndexOf('/');
+            if (lastSlash !== -1) {
+                pkg = trimmedPath.substring(0, lastSlash).replace(/\//g, '.');
+                className = trimmedPath.substring(lastSlash + 1);
+            }
+            className = className.replace('.java', '');
+            
+            let template = "";
+            if (pkg) {
+                template += `package ${pkg};\n\n`;
+            }
+            template += `public class ${className} {\n    // Khởi tạo các phương thức và thuộc tính cho OOP\n}\n`;
+            
+            projectFiles.push({
+                path: trimmedPath,
+                content: template
+            });
+            
+            activeFilePath = trimmedPath;
+            if (editor) {
+                editor.setValue(template);
+            }
+            
+            renderFileList();
+            showToast(`Đã tạo tệp ${trimmedPath} thành công!`, 'success');
+        }
+
+        // Delete project file
+        function deleteProjectFile(pathToDelete) {
+            if (pathToDelete === 'Main.java') {
+                alert("Không thể xóa tệp chính Main.java");
+                return;
+            }
+            
+            if (!confirm(`Bạn chắc chắn muốn xóa tệp ${pathToDelete}?`)) {
+                return;
+            }
+            
+            const index = projectFiles.findIndex(f => f.path === pathToDelete);
+            if (index !== -1) {
+                projectFiles.splice(index, 1);
+                
+                if (activeFilePath === pathToDelete) {
+                    activeFilePath = 'Main.java';
+                    const mainFile = projectFiles.find(f => f.path === 'Main.java');
+                    if (editor && mainFile) {
+                        editor.setValue(mainFile.content);
+                    }
+                }
+                
+                renderFileList();
+                showToast(`Đã xóa tệp ${pathToDelete}.`, 'info');
             }
         }
 
@@ -277,8 +461,10 @@
         let editor;
         require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.39.0/min/vs' } });
         require(['vs/editor/editor.main'], function () {
+            const activeFile = projectFiles.find(f => f.path === activeFilePath) || projectFiles[0];
+            
             editor = monaco.editor.create(document.getElementById('editor-container'), {
-                value: `@Html.Raw(JavaScriptEncoder.Default.Encode(Model.CurrentSnippet?.Code ?? Model.DefaultCode))`,
+                value: activeFile ? activeFile.content : '',
                 language: 'java',
                 theme: 'vs-dark',
                 automaticLayout: true,
@@ -288,25 +474,54 @@
                 roundedSelection: true,
                 cursorBlinking: "smooth",
                 cursorSmoothCaretAnimation: "on",
-                readOnly: @(isAuthenticated ? "false" : "true") // ReadOnly nếu chưa login
+                readOnly: @(isAuthenticated ? "false" : "true")
             });
+
+            renderFileList();
         });
 
         // Load code from History click
         function loadHistoryCode(element) {
             const code = element.getAttribute('data-code');
             if (editor && code) {
+                try {
+                    const parsed = JSON.parse(code);
+                    if (Array.isArray(parsed) && parsed.length > 0) {
+                        projectFiles = parsed;
+                        activeFilePath = projectFiles[0]?.path || 'Main.java';
+                        const activeFile = projectFiles.find(f => f.path === activeFilePath);
+                        editor.setValue(activeFile ? activeFile.content : '');
+                        renderFileList();
+                        showToast("Đã tải toàn bộ dự án từ lịch sử chạy!", "success");
+                        switchTab('snippets');
+                        return;
+                    }
+                } catch (e) {
+                    // Fallback to legacy string format
+                }
+                
+                projectFiles = [{ path: 'Main.java', content: code }];
+                activeFilePath = 'Main.java';
                 editor.setValue(code);
+                renderFileList();
                 showToast("Đã tải mã nguồn từ lịch sử chạy!", "info");
-                switchTab('snippets'); // Switch back to snippets to see file structure
+                switchTab('snippets');
             }
         }
 
         // Submit Save Form
         function submitSaveForm() {
             if (!editor) return;
-            const code = editor.getValue();
-            document.getElementById('hidden-code-area').value = code;
+            
+            // Save current editor value
+            const currentContent = editor.getValue();
+            const file = projectFiles.find(f => f.path === activeFilePath);
+            if (file) {
+                file.content = currentContent;
+            }
+            
+            // Submit as JSON string
+            document.getElementById('hidden-code-area').value = JSON.stringify(projectFiles);
             document.getElementById('save-form').submit();
         }
 
@@ -314,7 +529,13 @@
         function runJavaCode() {
             if (!editor) return;
             
-            const code = editor.getValue();
+            // Save current editor value
+            const currentContent = editor.getValue();
+            const file = projectFiles.find(f => f.path === activeFilePath);
+            if (file) {
+                file.content = currentContent;
+            }
+
             const terminal = document.getElementById('terminal-output');
             const timer = document.getElementById('terminal-timer');
             const runBtn = document.getElementById('run-btn');
@@ -332,7 +553,7 @@
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
-                    code: code,
+                    files: projectFiles,
                     snippetId: snippetId
                 })
             })
@@ -340,18 +561,14 @@
                 const data = await response.json();
                 
                 if (response.ok) {
-                    // Chạy thành công
                     terminal.textContent = data.output;
                     terminal.className = "flex-grow p-4 overflow-y-auto bg-black text-emerald-400 code-font text-xs leading-relaxed whitespace-pre-wrap select-text";
                     
-                    // Show timer
                     timer.textContent = `Thời gian: ${data.durationMs} ms`;
                     timer.classList.remove('hidden');
 
-                    // Cập nhật quota hiển thị trên giao diện
                     updateQuotaDisplay(data.remainingQuota);
                 } else {
-                    // Lỗi từ Middleware (ví dụ: 429 Hết Quota, hoặc 401 Unauthorized)
                     terminal.textContent = `[LỖI HỆ THỐNG - HTTP ${response.status}]\n${data.message || 'Lỗi không xác định.'}`;
                     terminal.className = "flex-grow p-4 overflow-y-auto bg-black text-red-500 code-font text-xs leading-relaxed whitespace-pre-wrap select-text";
                 }
@@ -365,7 +582,7 @@
             });
         }
 
-        // Cập nhật quota widget
+        // Update quota widget
         function updateQuotaDisplay(remaining) {
             const badge = document.getElementById('quota-badge');
             const progress = document.getElementById('quota-progress');
@@ -422,7 +639,7 @@
             }, 3000);
         }
 
-        // Display tempdata alert from server redirect (if any)
+        // Display tempdata alert from server redirect
         @if (TempData["SuccessMessage"] != null)
         {
             <text>

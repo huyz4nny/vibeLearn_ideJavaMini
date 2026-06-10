@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using JavaIdeMini.Services;
 
 namespace JavaIdeMini.Pages.s
 {
@@ -53,6 +54,16 @@ namespace JavaIdeMini.Pages.s
                 return RedirectToPage("/Index");
             }
 
+            // Tự động chuyển đổi và chuẩn hóa sang JSON nếu snippet cũ lưu dạng text thuần
+            if (!IsValidJson(SharedSnippet.Code))
+            {
+                var legacyFiles = new List<JavaFile>
+                {
+                    new JavaFile { Path = SharedSnippet.Title ?? "Main.java", Content = SharedSnippet.Code }
+                };
+                SharedSnippet.Code = System.Text.Json.JsonSerializer.Serialize(legacyFiles);
+            }
+
             return Page();
         }
 
@@ -88,12 +99,23 @@ namespace JavaIdeMini.Pages.s
                     return RedirectToPage("/Index");
                 }
 
+                // Tự động chuyển đổi và chuẩn hóa sang JSON nếu snippet gốc vẫn dạng text
+                var codeContent = originalSnippet.Code;
+                if (!IsValidJson(codeContent))
+                {
+                    var legacyFiles = new List<JavaFile>
+                    {
+                        new JavaFile { Path = originalSnippet.Title ?? "Main.java", Content = codeContent }
+                    };
+                    codeContent = System.Text.Json.JsonSerializer.Serialize(legacyFiles);
+                }
+
                 // 3. Tạo snippet mới bản sao cho user hiện tại
                 var forkedSnippet = new Snippet
                 {
                     UserId = userId,
-                    Title = $"{originalSnippet.Title} (Forked)",
-                    Code = originalSnippet.Code,
+                    Title = originalSnippet.Title.EndsWith("(Forked)") ? originalSnippet.Title : $"{originalSnippet.Title} (Forked)",
+                    Code = codeContent,
                     IsPublic = false, // Mặc định bản sao chép sẽ riêng tư, user tự đổi sau
                     ShareId = GenerateShortId(),
                     CreatedAt = DateTimeOffset.UtcNow,
@@ -130,6 +152,30 @@ namespace JavaIdeMini.Pages.s
                 result[i] = chars[index];
             }
             return new string(result);
+        }
+
+        /// <summary>
+        /// Kiểm tra xem chuỗi có phải JSON hợp lệ hay không.
+        /// </summary>
+        private bool IsValidJson(string str)
+        {
+            if (string.IsNullOrWhiteSpace(str)) return false;
+            str = str.Trim();
+            if ((str.StartsWith("{") && str.EndsWith("}")) || (str.StartsWith("[") && str.EndsWith("]")))
+            {
+                try
+                {
+                    using (var jsonDoc = System.Text.Json.JsonDocument.Parse(str))
+                    {
+                        return true;
+                    }
+                }
+                catch
+                {
+                    return false;
+                }
+            }
+            return false;
         }
     }
 }

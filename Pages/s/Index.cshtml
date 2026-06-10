@@ -73,10 +73,26 @@
         </div>
     </div>
 
-    <!-- WORKSPACE: Monaco Editor (Read-Only) -->
-    <div class="flex-grow relative">
-        <div id="editor-container" class="absolute inset-0 w-full h-full"></div>
+    <!-- WORKSPACE: Monaco Editor & Sidebar File Explorer (Read-Only) -->
+    <div class="flex-grow flex relative overflow-hidden">
+        <!-- Project File Explorer (Left Panel) -->
+        <div class="w-64 border-r border-gray-900 bg-gray-950/10 flex flex-col shrink-0">
+            <div class="p-3 border-b border-gray-900/60 flex items-center justify-between text-xs select-none">
+                <span class="font-bold text-gray-400 uppercase tracking-wider text-[10px]">Cấu trúc dự án (OOP)</span>
+            </div>
+            <!-- File list container -->
+            <div id="project-files-list" class="flex-grow overflow-y-auto p-2 space-y-1 select-none">
+                <!-- Sẽ render động qua JS -->
+            </div>
+        </div>
+        
+        <!-- Editor (Right Panel) -->
+        <div class="flex-grow relative h-full">
+            <div id="editor-container" class="absolute inset-0 w-full h-full"></div>
+        </div>
     </div>
+    
+    <textarea id="hidden-project-data" class="hidden">@Model.SharedSnippet?.Code</textarea>
 
 </div>
 
@@ -84,11 +100,73 @@
     <!-- Loader CDN của Monaco Editor -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.39.0/min/vs/loader.min.js"></script>
     <script>
+        // Project files management
+        let projectFiles = [];
+        let activeFilePath = "Main.java";
+
+        // Initialize projectFiles from hidden textarea
+        try {
+            const rawData = document.getElementById('hidden-project-data').value;
+            projectFiles = JSON.parse(rawData);
+            activeFilePath = projectFiles[0]?.path || "Main.java";
+        } catch(e) {
+            projectFiles = [
+                { path: "Main.java", content: "public class Main {\n    public static void main(String[] args) {\n        System.out.println(\"Error loading code\");\n    }\n}" }
+            ];
+            activeFilePath = "Main.java";
+        }
+
+        // Render project file list
+        function renderFileList() {
+            const listContainer = document.getElementById('project-files-list');
+            if (!listContainer) return;
+            listContainer.innerHTML = '';
+            
+            projectFiles.forEach((file) => {
+                const isActive = file.path === activeFilePath;
+                
+                const item = document.createElement('div');
+                item.className = `group flex items-center justify-between p-2 rounded-xl cursor-pointer text-xs transition duration-150 border ${
+                    isActive 
+                        ? 'bg-violet-950/20 text-violet-400 border-violet-500/20 font-semibold' 
+                        : 'text-gray-400 hover:bg-gray-900/50 hover:text-gray-200 border-transparent'
+                }`;
+                item.setAttribute('onclick', `switchActiveFile("${file.path.replace(/"/g, '&quot;')}")`);
+                
+                const infoDiv = document.createElement('div');
+                infoDiv.className = 'flex items-center gap-2 truncate pr-2';
+                
+                const isSubfolder = file.path.includes('/');
+                const icon = isSubfolder ? '📂' : '📄';
+                
+                infoDiv.innerHTML = `<span>${icon}</span><span class="truncate" title="${file.path}">${file.path}</span>`;
+                item.appendChild(infoDiv);
+                
+                listContainer.appendChild(item);
+            });
+        }
+
+        // Switch active file in Monaco
+        function switchActiveFile(newPath) {
+            if (newPath === activeFilePath) return;
+            
+            activeFilePath = newPath;
+            const newFile = projectFiles.find(f => f.path === activeFilePath);
+            if (newFile && editor) {
+                editor.setValue(newFile.content);
+            }
+            
+            renderFileList();
+        }
+
+        // Initialize Monaco Editor
         let editor;
         require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.39.0/min/vs' } });
         require(['vs/editor/editor.main'], function () {
+            const activeFile = projectFiles.find(f => f.path === activeFilePath) || projectFiles[0];
+            
             editor = monaco.editor.create(document.getElementById('editor-container'), {
-                value: `@Html.Raw(JavaScriptEncoder.Default.Encode(Model.SharedSnippet?.Code ?? ""))`,
+                value: activeFile ? activeFile.content : '',
                 language: 'java',
                 theme: 'vs-dark',
                 automaticLayout: true,
@@ -99,6 +177,8 @@
                 domReadOnly: true,
                 cursorBlinking: "solid"
             });
+
+            renderFileList();
         });
 
         // Copy Share Link Function

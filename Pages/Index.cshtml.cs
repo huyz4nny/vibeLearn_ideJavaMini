@@ -54,20 +54,28 @@ namespace JavaIdeMini.Pages
         // Snippet đang được chỉnh sửa (nếu có)
         public Snippet? CurrentSnippet { get; set; }
 
-        // Code mặc định hiển thị trong Monaco Editor khi mới vào app
+        // Code mặc định hiển thị trong Monaco Editor khi mới vào app (định dạng JSON chứa nhiều file và package)
         public string DefaultCode { get; set; } = 
-@"public class Main {
-    public static void main(String[] args) {
-        System.out.println(""Xin chào C# .NET từ thế giới Java!"");
-        
-        // Vòng lặp tính tổng
-        int sum = 0;
-        for (int i = 1; i <= 10; i++) {
-            sum += i;
-        }
-        System.out.println(""Tổng từ 1 đến 10 là: "" + sum);
-    }
-}";
+"""
+[
+  {
+    "path": "Main.java",
+    "content": "public class Main {\n    public static void main(String[] args) {\n        System.out.println(\"Xin chào C# .NET từ thế giới Java! (Java 17 Compliance)\");\n        \n        // Sử dụng các lớp Dog và Cat từ package animals để ứng dụng OOP\n        animals.Dog myDog = new animals.Dog(\"Cậu Vàng\", 3);\n        animals.Cat myCat = new animals.Cat(\"Mimi\", 2);\n        \n        System.out.println(myDog.getDetail());\n        myDog.makeSound();\n        \n        System.out.println(myCat.getDetail());\n        myCat.makeSound();\n    }\n}"
+  },
+  {
+    "path": "animals/Animal.java",
+    "content": "package animals;\n\npublic abstract class Animal {\n    protected String name;\n    protected int age;\n\n    public Animal(String name, int age) {\n        this.name = name;\n        this.age = age;\n    }\n\n    public abstract void makeSound();\n\n    public String getDetail() {\n        return name + \" (\" + age + \" tuổi)\";\n    }\n}"
+  },
+  {
+    "path": "animals/Dog.java",
+    "content": "package animals;\n\npublic class Dog extends Animal {\n    public Dog(String name, int age) {\n        super(name, age);\n    }\n\n    @Override\n    public void makeSound() {\n        System.out.println(\"Gâu gâu! \");\n    }\n}"
+  },
+  {
+    "path": "animals/Cat.java",
+    "content": "package animals;\n\npublic class Cat extends Animal {\n    public Cat(String name, int age) {\n        super(name, age);\n    }\n\n    @Override\n    public void makeSound() {\n        System.out.println(\"Meo meo! \");\n    }\n}"
+  }
+]
+""";
 
         /// <summary>
         /// Xử lý load trang chủ. Nếu có tham số id, thực hiện load snippet tương ứng.
@@ -105,6 +113,16 @@ namespace JavaIdeMini.Pages
                     {
                         // Không tìm thấy hoặc không thuộc quyền sở hữu của user
                         return RedirectToPage("/Index");
+                    }
+
+                    // Tự động chuyển đổi và chuẩn hóa sang JSON nếu snippet cũ lưu dạng text thuần
+                    if (!IsValidJson(CurrentSnippet.Code))
+                    {
+                        var legacyFiles = new List<JavaFile>
+                        {
+                            new JavaFile { Path = CurrentSnippet.Title ?? "Main.java", Content = CurrentSnippet.Code }
+                        };
+                        CurrentSnippet.Code = System.Text.Json.JsonSerializer.Serialize(legacyFiles);
                     }
                 }
             }
@@ -230,6 +248,30 @@ namespace JavaIdeMini.Pages
                 result[i] = chars[index];
             }
             return new string(result);
+        }
+
+        /// <summary>
+        /// Kiểm tra xem chuỗi có phải JSON hợp lệ hay không.
+        /// </summary>
+        private bool IsValidJson(string str)
+        {
+            if (string.IsNullOrWhiteSpace(str)) return false;
+            str = str.Trim();
+            if ((str.StartsWith("{") && str.EndsWith("}")) || (str.StartsWith("[") && str.EndsWith("]")))
+            {
+                try
+                {
+                    using (var jsonDoc = System.Text.Json.JsonDocument.Parse(str))
+                    {
+                        return true;
+                    }
+                }
+                catch
+                {
+                    return false;
+                }
+            }
+            return false;
         }
     }
 }

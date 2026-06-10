@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Net.Http;
 using System.Text;
@@ -10,80 +11,85 @@ using Microsoft.Extensions.Logging;
 namespace JavaIdeMini.Services
 {
     /// <summary>
-    /// Service kết nối với Piston API công khai để biên dịch và chạy code Java.
+    /// Service kết nối với Wandbox API để biên dịch và chạy code Java.
+    /// Hỗ trợ lập trình hướng đối tượng (OOP) đa tệp tin và nhiều packages.
     /// </summary>
-    /// <remarks>
-    /// 💡 **So sánh Java ↔ C#**:
-    /// - **Stopwatch vs System.currentTimeMillis()**:
-    ///   - Trong Java, để đo thời gian chạy của một đoạn code, ta thường ghi nhận `System.currentTimeMillis()` trước và sau khi chạy rồi trừ cho nhau.
-    ///   - Trong C#, ta dùng class `Stopwatch` chuyên dụng trong namespace `System.Diagnostics` để đo đạc thời gian có độ chính xác cao.
-    /// - **HttpClient Lifecycle**:
-    ///   - Tránh việc khởi tạo `new HttpClient()` thủ công vì mỗi thực thể HttpClient khi dispose sẽ giải phóng kết nối chậm, dẫn đến "Socket Exhaustion".
-    ///   - Dùng `IHttpClientFactory.CreateClient()` giống như dùng `HttpClientBuilder` trong Apache HttpClient để quản lý pool các kết nối.
-    /// </remarks>
     public class CompilerService
     {
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly ILogger<CompilerService> _logger;
-        private const string PistonUrl = "https://emkc.org/api/v2/piston/execute";
+        private const string WandboxUrl = "https://wandbox.org/api/compile.json";
+        private const string JavaCompiler = "openjdk-jdk-21+35"; // OpenJDK 21 (tương thích ngược hoàn toàn với Java 17)
 
         /// <summary>
         /// Khởi tạo CompilerService.
         /// </summary>
-        public CompilerService(IHttpClientFactory httpClientFactory, ILogger<CompilerService> _logger)
+        public CompilerService(IHttpClientFactory httpClientFactory, ILogger<CompilerService> logger)
         {
-            this._httpClientFactory = httpClientFactory;
-            this._logger = _logger;
+            _httpClientFactory = httpClientFactory;
+            _logger = logger;
         }
 
         /// <summary>
-        /// Gửi code Java lên Piston API để biên dịch và thực thi.
+        /// Gửi danh sách các file Java lên Wandbox API để biên dịch và thực thi.
+        /// Hỗ trợ cấu trúc thư mục package phức tạp để ứng dụng OOP.
         /// </summary>
-        public async Task<CompileResult> ExecuteJavaCodeAsync(string javaCode)
+        public async Task<CompileResult> ExecuteJavaCodeAsync(List<JavaFile> files)
         {
             var stopwatch = Stopwatch.StartNew();
             try
             {
                 var client = _httpClientFactory.CreateClient();
 
-                // Chuẩn bị payload gửi lên Piston API
-                var payload = new PistonRequest
+                // 💡 GIẢI PHÁP BIÊN DỊCH ĐA FILE TRÊN WANDBOX:
+                // - File code chính trong tham số "code" của Wandbox luôn được ghi vào file 'prog.java'.
+                // - Để hỗ trợ người dùng viết class 'public class Main' trong tệp 'Main.java' (và các file OOP khác),
+                //   chúng ta truyền một file khởi chạy trung gian 'prog.java' làm code chính để gọi hàm main của lớp Main:
+                //   "class prog { public static void main(String[] args) { Main.main(args); } }"
+                // - Toàn bộ các file Java của người dùng (kể cả Main.java và các class ở package khác) 
+                //   sẽ được truyền qua mảng "codes" với đường dẫn chính xác (ví dụ: "com/example/Dog.java").
+                var bootstrapCode = "class prog { public static void main(String[] args) { Main.main(args); } }";
+
+                var wandboxFiles = new List<WandboxFile>();
+                foreach (var file in files)
                 {
-                    Language = "java",
-                    Version = "15.0.2", // Phiên bản Java mặc định của Piston
-                    Files = new[]
+                    wandboxFiles.Add(new WandboxFile
                     {
-                        new PistonFile
-                        {
-                            Name = "Main.java",
-                            Content = javaCode
-                        }
-                    }
+                        File = file.Path,
+                        Code = file.Content
+                    });
+                }
+
+                var payload = new WandboxRequest
+                {
+                    Compiler = JavaCompiler,
+                    Code = bootstrapCode,
+                    Codes = wandboxFiles.ToArray(),
+                    CompilerOptionRaw = "--release\n17"
                 };
 
                 var jsonPayload = JsonSerializer.Serialize(payload);
                 var content = new StringContent(jsonPayload, Encoding.UTF8, "application/json");
 
-                // Gửi HTTP POST request
-                var response = await client.PostAsync(PistonUrl, content);
+                var response = await client.PostAsync(WandboxUrl, content);
                 stopwatch.Stop();
 
                 var responseString = await response.Content.ReadAsStringAsync();
 
                 if (!response.IsSuccessStatusCode)
                 {
-                    _logger.LogWarning($"Piston API trả về lỗi: {responseString}");
+                    _logger.LogWarning($"Wandbox API trả về lỗi: {responseString}");
                     return new CompileResult
                     {
                         Success = false,
-                        Output = $"Lỗi hệ thống biên dịch (HTTP {response.StatusCode}):\n{responseString}",
+                        Output = $"Lỗi hệ thống biên dịch Wandbox (HTTP {response.StatusCode}):\n{responseString}",
                         DurationMs = (int)stopwatch.ElapsedMilliseconds
                     };
                 }
 
-                var pistonResponse = JsonSerializer.Deserialize<PistonResponse>(responseString);
+                var wandboxResponse = JsonSerializer.Deserialize<WandboxResponse>(responseString);
 
-                if (pistonResponse?.Run == null)
+                if (wandboxResponse == null)
                 {
                     return new CompileResult
                     {
@@ -93,25 +99,42 @@ namespace JavaIdeMini.Services
                     };
                 }
 
-                // Nếu Piston biên dịch/chạy có lỗi (stderr có dữ liệu hoặc exit code khác 0)
-                bool isSuccess = pistonResponse.Run.Code == 0 && string.IsNullOrEmpty(pistonResponse.Run.Stderr);
-                string output = isSuccess ? pistonResponse.Run.Stdout : pistonResponse.Run.Output;
+                bool isSuccess = wandboxResponse.Status == 0;
+                
+                string output = string.Empty;
+                if (!string.IsNullOrEmpty(wandboxResponse.CompilerError))
+                {
+                    output += "[LỖI BIÊN DỊCH]\n" + wandboxResponse.CompilerError + "\n";
+                }
+                if (!string.IsNullOrEmpty(wandboxResponse.ProgramError))
+                {
+                    output += "[LỖI CHƯƠNG TRÌNH (RUNTIME)]\n" + wandboxResponse.ProgramError + "\n";
+                }
+                if (!string.IsNullOrEmpty(wandboxResponse.ProgramOutput))
+                {
+                    output += wandboxResponse.ProgramOutput;
+                }
+
+                if (string.IsNullOrEmpty(output))
+                {
+                    output = isSuccess ? "(Chương trình chạy thành công, không có output)" : "(Chương trình lỗi, không có output)";
+                }
 
                 return new CompileResult
                 {
                     Success = isSuccess,
-                    Output = string.IsNullOrEmpty(output) ? "(Không có output)" : output,
+                    Output = output,
                     DurationMs = (int)stopwatch.ElapsedMilliseconds
                 };
             }
             catch (Exception ex)
             {
                 stopwatch.Stop();
-                _logger.LogError(ex, "Lỗi xảy ra khi gọi Piston API");
+                _logger.LogError(ex, "Lỗi xảy ra khi gọi Wandbox API");
                 return new CompileResult
                 {
                     Success = false,
-                    Output = $"Lỗi kết nối tới server biên dịch: {ex.Message}",
+                    Output = $"Lỗi kết nối tới server biên dịch Wandbox: {ex.Message}",
                     DurationMs = (int)stopwatch.ElapsedMilliseconds
                 };
             }
@@ -119,7 +142,7 @@ namespace JavaIdeMini.Services
     }
 
     /// <summary>
-    /// Kết quả trả về sau khi biên dịch và chạy code.
+    /// Kết quả biên dịch và chạy code Java.
     /// </summary>
     public class CompileResult
     {
@@ -128,55 +151,57 @@ namespace JavaIdeMini.Services
         public int DurationMs { get; set; }
     }
 
-    // Các class DTO ánh xạ cấu trúc request/response của Piston API
-    internal class PistonRequest
+    /// <summary>
+    /// Thực thể đại diện cho một file Java trong project.
+    /// </summary>
+    public class JavaFile
     {
-        [JsonPropertyName("language")]
-        public string Language { get; set; } = "java";
-
-        [JsonPropertyName("version")]
-        public string Version { get; set; } = "15.0.2";
-
-        [JsonPropertyName("files")]
-        public PistonFile[] Files { get; set; } = Array.Empty<PistonFile>();
-    }
-
-    internal class PistonFile
-    {
-        [JsonPropertyName("name")]
-        public string Name { get; set; } = "Main.java";
+        [JsonPropertyName("path")]
+        public string Path { get; set; } = string.Empty;
 
         [JsonPropertyName("content")]
         public string Content { get; set; } = string.Empty;
     }
 
-    internal class PistonResponse
+    internal class WandboxRequest
     {
-        [JsonPropertyName("language")]
-        public string? Language { get; set; }
-
-        [JsonPropertyName("version")]
-        public string? Version { get; set; }
-
-        [JsonPropertyName("run")]
-        public PistonRunResult? Run { get; set; }
-    }
-
-    internal class PistonRunResult
-    {
-        [JsonPropertyName("stdout")]
-        public string Stdout { get; set; } = string.Empty;
-
-        [JsonPropertyName("stderr")]
-        public string Stderr { get; set; } = string.Empty;
+        [JsonPropertyName("compiler")]
+        public string Compiler { get; set; } = "openjdk-jdk-21+35";
 
         [JsonPropertyName("code")]
-        public int Code { get; set; }
+        public string Code { get; set; } = string.Empty;
 
-        [JsonPropertyName("signal")]
-        public string? Signal { get; set; }
+        [JsonPropertyName("codes")]
+        public WandboxFile[] Codes { get; set; } = Array.Empty<WandboxFile>();
 
-        [JsonPropertyName("output")]
-        public string Output { get; set; } = string.Empty;
+        [JsonPropertyName("compiler-option-raw")]
+        public string CompilerOptionRaw { get; set; } = string.Empty;
+    }
+
+    internal class WandboxFile
+    {
+        [JsonPropertyName("file")]
+        public string File { get; set; } = string.Empty;
+
+        [JsonPropertyName("code")]
+        public string Code { get; set; } = string.Empty;
+    }
+
+    internal class WandboxResponse
+    {
+        [JsonPropertyName("status")]
+        public int Status { get; set; }
+
+        [JsonPropertyName("compiler_output")]
+        public string? CompilerOutput { get; set; }
+
+        [JsonPropertyName("compiler_error")]
+        public string? CompilerError { get; set; }
+
+        [JsonPropertyName("program_output")]
+        public string? ProgramOutput { get; set; }
+
+        [JsonPropertyName("program_error")]
+        public string? ProgramError { get; set; }
     }
 }

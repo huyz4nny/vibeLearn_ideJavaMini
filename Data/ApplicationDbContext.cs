@@ -60,13 +60,6 @@ namespace JavaIdeMini.Data
                 .IsUnique()
                 .HasDatabaseName("unique_user_date");
 
-            // Thiết lập giá trị mặc định cho ngày của run_quota
-            modelBuilder.Entity<RunQuota>()
-                .Property(rq => rq.Date)
-                .HasConversion(
-                    d => d.ToDateTime(TimeOnly.MinValue),
-                    d => DateOnly.FromDateTime(d)
-                );
         }
     }
 }
