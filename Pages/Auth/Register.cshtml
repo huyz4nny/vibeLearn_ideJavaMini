@@ -1,0 +1,92 @@
+@page
+@model JavaIdeMini.Pages.Auth.RegisterModel
+@{
+    Layout = null;
+}
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Đăng ký tài khoản - Java IDE Mini</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Outfit', sans-serif;
+            background: radial-gradient(circle at top right, #111827 0%, #030712 100%);
+        }
+    </style>
+</head>
+<body class="flex items-center justify-center min-h-screen text-white p-4">
+    <!-- Outer Container with ambient glow -->
+    <div class="relative w-full max-w-md">
+        <!-- Glow effect behind container -->
+        <div class="absolute -inset-1.5 rounded-3xl bg-gradient-to-r from-indigo-600 to-violet-600 opacity-30 blur-2xl transition duration-1000"></div>
+
+        <!-- Glassmorphism Card -->
+        <div class="relative w-full bg-gray-950/70 backdrop-blur-2xl border border-gray-800/80 rounded-3xl p-8 shadow-2xl">
+            
+            <!-- Logo & Title -->
+            <div class="text-center mb-8">
+                <div class="inline-flex items-center justify-center p-3.5 bg-indigo-600/10 border border-indigo-500/20 rounded-2xl mb-4">
+                    <!-- Register User Icon -->
+                    <svg class="w-8 h-8 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"></path>
+                    </svg>
+                </div>
+                <h1 class="text-3xl font-extrabold tracking-tight bg-gradient-to-r from-indigo-400 via-fuchsia-400 to-violet-400 bg-clip-text text-transparent">
+                    Đăng ký tài khoản
+                </h1>
+                <p class="text-gray-400 mt-2 text-sm">Tạo tài khoản để lưu trữ mã nguồn và theo dõi lịch sử</p>
+            </div>
+
+            <!-- Error Alerts -->
+            @if (!string.IsNullOrEmpty(Model.ErrorMessage))
+            {
+                <div class="mb-5 p-4 bg-red-500/10 border border-red-500/20 text-red-400 text-sm rounded-2xl flex items-center gap-3 animate-pulse">
+                    <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+                    <span>@Model.ErrorMessage</span>
+                </div>
+            }
+
+            <!-- Form Đăng ký -->
+            <form method="post" class="space-y-5">
+                <div>
+                    <label for="Email" class="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">Địa chỉ Email</label>
+                    <input asp-for="Email" type="email" placeholder="example@gmail.com" 
+                           class="w-full bg-gray-900/50 border border-gray-800 rounded-2xl px-4 py-3.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all duration-300" />
+                    <span asp-validation-for="Email" class="text-red-400 text-xs mt-1 block"></span>
+                </div>
+
+                <div>
+                    <label for="Password" class="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">Mật khẩu (tối thiểu 6 ký tự)</label>
+                    <input asp-for="Password" type="password" placeholder="••••••••" 
+                           class="w-full bg-gray-900/50 border border-gray-800 rounded-2xl px-4 py-3.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all duration-300" />
+                    <span asp-validation-for="Password" class="text-red-400 text-xs mt-1 block"></span>
+                </div>
+
+                <div>
+                    <label for="ConfirmPassword" class="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">Xác nhận mật khẩu</label>
+                    <input asp-for="ConfirmPassword" type="password" placeholder="••••••••" 
+                           class="w-full bg-gray-900/50 border border-gray-800 rounded-2xl px-4 py-3.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition-all duration-300" />
+                    <span asp-validation-for="ConfirmPassword" class="text-red-400 text-xs mt-1 block"></span>
+                </div>
+
+                <button type="submit" 
+                        class="w-full bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-semibold rounded-2xl py-3.5 transition duration-300 shadow-lg shadow-indigo-600/20 active:scale-[0.98]">
+                    Tạo tài khoản mới
+                </button>
+            </form>
+
+            <!-- Footer / Redirect to Login -->
+            <p class="text-center text-gray-500 text-sm mt-8">
+                Đã có tài khoản? 
+                <a href="/Auth/Login" class="text-indigo-400 hover:text-indigo-300 font-semibold transition duration-150">Đăng nhập ngay</a>
+            </p>
+
+        </div>
+    </div>
+</body>
+</html>

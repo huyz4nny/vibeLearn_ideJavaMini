@@ -1,0 +1,88 @@
+@page
+@model JavaIdeMini.Pages.Auth.CallbackModel
+@{
+    Layout = null;
+}
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Đang xác thực tài khoản - Java IDE Mini</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Outfit', sans-serif;
+            background: radial-gradient(circle at center, #111827 0%, #030712 100%);
+        }
+    </style>
+</head>
+<body class="flex items-center justify-center min-h-screen text-white overflow-hidden">
+    <div class="text-center space-y-6 max-w-md p-8 bg-gray-900/60 backdrop-blur-xl border border-gray-800 rounded-3xl shadow-2xl relative">
+        <!-- Ambient background glow -->
+        <div class="absolute -inset-1 rounded-3xl bg-gradient-to-r from-violet-600 to-indigo-600 opacity-20 blur-xl"></div>
+        
+        <div class="relative space-y-4">
+            <!-- Spinner -->
+            <div class="flex justify-center">
+                <div class="animate-spin rounded-full h-14 w-14 border-t-4 border-b-4 border-violet-500 border-t-transparent"></div>
+            </div>
+            <h2 class="text-2xl font-bold tracking-tight bg-gradient-to-r from-violet-400 to-indigo-400 bg-clip-text text-transparent">Đang xác thực tài khoản...</h2>
+            <p class="text-gray-400 text-sm">Vui lòng đợi trong giây lát khi chúng tôi xử lý phiên đăng nhập của bạn.</p>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener("DOMContentLoaded", function() {
+            // Lấy chuỗi hash từ URL (ví dụ: #access_token=...&refresh_token=...&expires_in=3600)
+            const hash = window.location.hash;
+            
+            if (hash) {
+                // Remove '#' ở đầu và tách các cặp key=value
+                const params = new URLSearchParams(hash.substring(1));
+                const accessToken = params.get("access_token");
+                const refreshToken = params.get("refresh_token");
+                const expiresIn = parseInt(params.get("expires_in") || "3600");
+
+                if (accessToken) {
+                    // Gửi token lên server để lưu vào HttpOnly Cookie bảo mật
+                    fetch(window.location.pathname, {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json"
+                        },
+                        body: JSON.stringify({
+                            access_token: accessToken,
+                            refresh_token: refreshToken,
+                            expires_in: expiresIn
+                        })
+                    })
+                    .then(response => {
+                        if (response.ok) {
+                            return response.json();
+                        }
+                        throw new Error("Không thể thiết lập phiên đăng nhập trên server.");
+                    })
+                    .then(data => {
+                        // Redirect về trang chủ sau khi lưu cookie thành công
+                        window.location.href = data.redirectTo || "/";
+                    })
+                    .catch(err => {
+                        console.error(err);
+                        alert("Lỗi đăng nhập: " + err.message);
+                        window.location.href = "/Auth/Login?handler=Error&msg=" + encodeURIComponent(err.message);
+                    });
+                } else {
+                    // Không tìm thấy access_token trong hash
+                    window.location.href = "/";
+                }
+            } else {
+                // Không có hash fragment -> Redirect về trang chủ
+                window.location.href = "/";
+            }
+        });
+    </script>
+</body>
+</html>

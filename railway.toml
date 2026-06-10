@@ -1,0 +1,8 @@
+# Cấu hình Railway.app để build và deploy ứng dụng
+[build]
+builder = "dockerfile"        # Sử dụng Dockerfile tự định nghĩa ở trên để build
+dockerfilePath = "Dockerfile" # Chỉ định đường dẫn tới Dockerfile
+
+[deploy]
+restartPolicyType = "ON_FAILURE" # Tự động restart container nếu app bị crash/failure
+restartPolicyMaxRetries = 10     # Số lần restart tối đa trước khi đánh dấu là deploy failed

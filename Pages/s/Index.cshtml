@@ -1,0 +1,143 @@
+@page "/s/{shortId}"
+@model JavaIdeMini.Pages.s.IndexModel
+@using System.Text.Encodings.Web
+@{
+    ViewData["Title"] = $"Xem mã nguồn {Model.SharedSnippet?.Title}";
+    var authorName = Model.SharedSnippet?.UserProfile?.FullName ?? "Người dùng ẩn danh";
+    var authorAvatar = Model.SharedSnippet?.UserProfile?.AvatarUrl ?? "";
+    var shareId = Model.SharedSnippet?.ShareId ?? "";
+}
+
+<!-- Toast Notification -->
+<div id="toast" class="fixed bottom-5 right-5 z-50 transform translate-y-10 opacity-0 transition-all duration-300 pointer-events-none">
+    <div class="bg-gray-900 border border-gray-800 text-gray-200 px-5 py-3 rounded-2xl shadow-2xl flex items-center gap-3">
+        <div id="toast-icon" class="p-1.5 bg-emerald-600/10 text-emerald-400 rounded-xl">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+        </div>
+        <span id="toast-message" class="text-sm font-medium">Thông báo</span>
+    </div>
+</div>
+
+<div class="flex-grow flex flex-col bg-gray-950/40 border border-gray-900 rounded-3xl overflow-hidden backdrop-blur-xl h-[calc(100vh-140px)]">
+    
+    <!-- TOP TOOLBAR: File Info & Actions -->
+    <div class="flex flex-wrap items-center justify-between gap-4 p-4 border-b border-gray-900 bg-gray-950/50">
+        
+        <!-- File Info & Author -->
+        <div class="flex items-center gap-3.5">
+            <div class="p-2.5 bg-gray-900/80 border border-gray-800 rounded-2xl text-lg">
+                📄
+            </div>
+            <div>
+                <h1 class="text-sm font-bold text-white flex items-center gap-2">
+                    <span>@Model.SharedSnippet?.Title</span>
+                    <span class="px-2 py-0.5 bg-violet-600/10 border border-violet-500/20 text-violet-400 text-[9px] font-bold rounded-lg uppercase tracking-wider">Chỉ đọc</span>
+                </h1>
+                <div class="flex items-center gap-1.5 mt-1 text-[10px] text-gray-500">
+                    <span>Tác giả:</span>
+                    @if (!string.IsNullOrEmpty(authorAvatar))
+                    {
+                        <img src="@authorAvatar" alt="Avatar" class="w-4 h-4 rounded-full" />
+                    }
+                    <span class="font-semibold text-gray-400">@authorName</span>
+                    <span>•</span>
+                    <span>Lưu lúc: @Model.SharedSnippet?.UpdatedAt.LocalDateTime.ToString("dd/MM/yyyy HH:mm")</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="flex items-center gap-2">
+            <!-- Form Fork -->
+            <form method="post" asp-page-handler="Fork" asp-route-shortId="@shareId">
+                <button type="submit" 
+                        class="bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white text-xs font-bold px-4 py-2 rounded-xl transition duration-300 shadow-md shadow-violet-600/10 flex items-center gap-1.5 active:scale-95">
+                    <span>🍴</span>
+                    <span>Fork về Workspace</span>
+                </button>
+            </form>
+
+            <!-- Copy Link -->
+            <button onclick="copyLink()" 
+                    class="bg-gray-900 hover:bg-gray-800 border border-gray-800 text-gray-200 text-xs font-bold px-4 py-2 rounded-xl transition duration-300 flex items-center gap-1.5 active:scale-95">
+                <span>🔗</span>
+                <span>Copy Link</span>
+            </button>
+
+            <!-- Back to Home -->
+            <a asp-page="/Index" 
+               class="bg-gray-900 hover:bg-gray-800 border border-gray-800 text-gray-400 hover:text-white text-xs font-bold px-4 py-2 rounded-xl transition duration-300 flex items-center gap-1.5 active:scale-95">
+                <span>🏠</span>
+                <span>Về trang chủ</span>
+            </a>
+        </div>
+    </div>
+
+    <!-- WORKSPACE: Monaco Editor (Read-Only) -->
+    <div class="flex-grow relative">
+        <div id="editor-container" class="absolute inset-0 w-full h-full"></div>
+    </div>
+
+</div>
+
+@section Scripts {
+    <!-- Loader CDN của Monaco Editor -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.39.0/min/vs/loader.min.js"></script>
+    <script>
+        let editor;
+        require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.39.0/min/vs' } });
+        require(['vs/editor/editor.main'], function () {
+            editor = monaco.editor.create(document.getElementById('editor-container'), {
+                value: `@Html.Raw(JavaScriptEncoder.Default.Encode(Model.SharedSnippet?.Code ?? ""))`,
+                language: 'java',
+                theme: 'vs-dark',
+                automaticLayout: true,
+                fontSize: 14,
+                fontFamily: "'Fira Code', monospace",
+                minimap: { enabled: false },
+                readOnly: true, // Chế độ chỉ đọc
+                domReadOnly: true,
+                cursorBlinking: "solid"
+            });
+        });
+
+        // Copy Share Link Function
+        function copyLink() {
+            navigator.clipboard.writeText(window.location.href).then(() => {
+                showToast("Đã copy link chia sẻ vào clipboard!", "success");
+            }).catch(err => {
+                showToast("Lỗi khi copy link: " + err, "error");
+            });
+        }
+
+        // Show Toast Function
+        function showToast(message, type) {
+            const toast = document.getElementById('toast');
+            const msgSpan = document.getElementById('toast-message');
+            const icon = document.getElementById('toast-icon');
+
+            msgSpan.textContent = message;
+
+            if (type === 'success') {
+                icon.className = "p-1.5 bg-emerald-600/10 text-emerald-400 rounded-xl";
+                icon.innerHTML = '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>';
+            } else {
+                icon.className = "p-1.5 bg-red-600/10 text-red-400 rounded-xl";
+                icon.innerHTML = '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>';
+            }
+
+            toast.classList.remove('opacity-0', 'translate-y-10', 'pointer-events-none');
+            
+            setTimeout(() => {
+                toast.classList.add('opacity-0', 'translate-y-10', 'pointer-events-none');
+            }, 3000);
+        }
+
+        @if (TempData["ErrorMessage"] != null)
+        {
+            <text>
+            showToast("@TempData["ErrorMessage"]", "error");
+            </text>
+        }
+    </script>
+}
