@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Net.Http;
 using System.Text;
-using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
@@ -11,132 +11,230 @@ using Microsoft.Extensions.Logging;
 namespace JavaIdeMini.Services
 {
     /// <summary>
-    /// Service kết nối với Wandbox API để biên dịch và chạy code Java.
-    /// Hỗ trợ lập trình hướng đối tượng (OOP) đa tệp tin và nhiều packages.
+    /// Service biên dịch và chạy trực tiếp mã nguồn Java trên máy chủ (Self-hosted Compiler).
+    /// Hỗ trợ lập trình hướng đối tượng (OOP) đa tệp tin, nhiều packages và giới hạn thời gian (Timeout).
     /// </summary>
     public class CompilerService
     {
-        private readonly IHttpClientFactory _httpClientFactory;
         private readonly ILogger<CompilerService> _logger;
-        private const string WandboxUrl = "https://wandbox.org/api/compile.json";
-        private const string JavaCompiler = "openjdk-jdk-21+35"; // OpenJDK 21 (tương thích ngược hoàn toàn với Java 17)
 
         /// <summary>
         /// Khởi tạo CompilerService.
+        /// Giữ lại HttpClientFactory để tương thích ngược cấu hình DI cũ trong Program.cs.
         /// </summary>
         public CompilerService(IHttpClientFactory httpClientFactory, ILogger<CompilerService> logger)
         {
-            _httpClientFactory = httpClientFactory;
             _logger = logger;
         }
 
         /// <summary>
-        /// Gửi danh sách các file Java lên Wandbox API để biên dịch và thực thi.
-        /// Hỗ trợ cấu trúc thư mục package phức tạp để ứng dụng OOP.
+        /// Biên dịch và chạy danh sách các file Java cục bộ trên server.
         /// </summary>
         public async Task<CompileResult> ExecuteJavaCodeAsync(List<JavaFile> files)
         {
             var stopwatch = Stopwatch.StartNew();
+            
+            // Tạo thư mục chạy tạm thời trong thư mục scratch của workspace
+            var scratchDir = Path.Combine(Directory.GetCurrentDirectory(), "scratch");
+            if (!Directory.Exists(scratchDir))
+            {
+                Directory.CreateDirectory(scratchDir);
+            }
+            
+            var runId = Guid.NewGuid().ToString("N");
+            var tempDir = Path.Combine(scratchDir, $"run_{runId}");
+            var binDir = Path.Combine(tempDir, "bin");
+
             try
             {
-                var client = _httpClientFactory.CreateClient();
+                // 1. Tạo các thư mục cần thiết
+                Directory.CreateDirectory(tempDir);
+                Directory.CreateDirectory(binDir);
 
-                // 💡 GIẢI PHÁP BIÊN DỊCH ĐA FILE TRÊN WANDBOX:
-                // - File code chính trong tham số "code" của Wandbox luôn được ghi vào file 'prog.java'.
-                // - Để hỗ trợ người dùng viết class 'public class Main' trong tệp 'Main.java' (và các file OOP khác),
-                //   chúng ta truyền một file khởi chạy trung gian 'prog.java' làm code chính để gọi hàm main của lớp Main:
-                //   "class prog { public static void main(String[] args) { Main.main(args); } }"
-                // - Toàn bộ các file Java của người dùng (kể cả Main.java và các class ở package khác) 
-                //   sẽ được truyền qua mảng "codes" với đường dẫn chính xác (ví dụ: "com/example/Dog.java").
-                var bootstrapCode = "class prog { public static void main(String[] args) { Main.main(args); } }";
-
-                var wandboxFiles = new List<WandboxFile>();
+                // 2. Ghi các file Java của người dùng và tạo thư mục con (package) tương ứng
+                var sourceFiles = new List<string>();
                 foreach (var file in files)
                 {
-                    wandboxFiles.Add(new WandboxFile
+                    if (string.IsNullOrWhiteSpace(file.Path) || string.IsNullOrWhiteSpace(file.Content))
                     {
-                        File = file.Path,
-                        Code = file.Content
-                    });
+                        continue;
+                    }
+
+                    // Chuẩn hóa đường dẫn file (thay đổi / thành kí tự ngăn cách thư mục của hệ điều hành)
+                    var normalizedPath = file.Path.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar);
+                    var fullFilePath = Path.Combine(tempDir, normalizedPath);
+                    
+                    // Tạo thư mục cha nếu file nằm trong subfolder (package)
+                    var parentDir = Path.GetDirectoryName(fullFilePath);
+                    if (parentDir != null && !Directory.Exists(parentDir))
+                    {
+                        Directory.CreateDirectory(parentDir);
+                    }
+
+                    // Ghi nội dung file
+                    await File.WriteAllTextAsync(fullFilePath, file.Content, Encoding.UTF8);
+                    
+                    // Thêm vào danh sách file biên dịch
+                    sourceFiles.Add(normalizedPath);
                 }
 
-                var payload = new WandboxRequest
+                if (sourceFiles.Count == 0)
                 {
-                    Compiler = JavaCompiler,
-                    Code = bootstrapCode,
-                    Codes = wandboxFiles.ToArray(),
-                    CompilerOptionRaw = "--release\n17"
+                    return new CompileResult
+                    {
+                        Success = false,
+                        Output = "Không tìm thấy tệp mã nguồn Java hợp lệ để thực thi.",
+                        DurationMs = (int)stopwatch.ElapsedMilliseconds
+                    };
+                }
+
+                // 3. Tạo file sources.txt ghi danh sách các file cần compile (để tránh lỗi command line quá dài trên Windows)
+                var sourcesTxtPath = Path.Combine(tempDir, "sources.txt");
+                await File.WriteAllLinesAsync(sourcesTxtPath, sourceFiles, Encoding.UTF8);
+
+                // 4. Gọi trình biên dịch javac
+                var javacStartInfo = new ProcessStartInfo
+                {
+                    FileName = "javac",
+                    // Chỉ định compile release 17, xuất kết quả ra thư mục bin
+                    Arguments = "--release 17 -d bin @sources.txt",
+                    WorkingDirectory = tempDir,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
                 };
 
-                var jsonPayload = JsonSerializer.Serialize(payload);
-                var content = new StringContent(jsonPayload, Encoding.UTF8, "application/json");
-
-                var response = await client.PostAsync(WandboxUrl, content);
-                stopwatch.Stop();
-
-                var responseString = await response.Content.ReadAsStringAsync();
-
-                if (!response.IsSuccessStatusCode)
-                {
-                    _logger.LogWarning($"Wandbox API trả về lỗi: {responseString}");
-                    return new CompileResult
-                    {
-                        Success = false,
-                        Output = $"Lỗi hệ thống biên dịch Wandbox (HTTP {response.StatusCode}):\n{responseString}",
-                        DurationMs = (int)stopwatch.ElapsedMilliseconds
-                    };
-                }
-
-                var wandboxResponse = JsonSerializer.Deserialize<WandboxResponse>(responseString);
-
-                if (wandboxResponse == null)
+                using var javacProcess = Process.Start(javacStartInfo);
+                if (javacProcess == null)
                 {
                     return new CompileResult
                     {
                         Success = false,
-                        Output = "Không nhận được phản hồi kết quả chạy code.",
+                        Output = "Không thể khởi động trình biên dịch `javac`. Vui lòng kiểm tra xem JDK đã được cài đặt và cấu hình PATH chưa.",
                         DurationMs = (int)stopwatch.ElapsedMilliseconds
                     };
                 }
 
-                bool isSuccess = wandboxResponse.Status == 0;
+                // Chờ compile hoàn thành (timeout 10s)
+                var javacOutputTask = javacProcess.StandardOutput.ReadToEndAsync();
+                var javacErrorTask = javacProcess.StandardError.ReadToEndAsync();
                 
-                string output = string.Empty;
-                if (!string.IsNullOrEmpty(wandboxResponse.CompilerError))
+                if (!javacProcess.WaitForExit(10000))
                 {
-                    output += "[LỖI BIÊN DỊCH]\n" + wandboxResponse.CompilerError + "\n";
-                }
-                if (!string.IsNullOrEmpty(wandboxResponse.ProgramError))
-                {
-                    output += "[LỖI CHƯƠNG TRÌNH (RUNTIME)]\n" + wandboxResponse.ProgramError + "\n";
-                }
-                if (!string.IsNullOrEmpty(wandboxResponse.ProgramOutput))
-                {
-                    output += wandboxResponse.ProgramOutput;
+                    javacProcess.Kill();
+                    return new CompileResult
+                    {
+                        Success = false,
+                        Output = "[LỖI BIÊN DỊCH]\nQuá thời gian biên dịch (javac timeout 10 giây).",
+                        DurationMs = (int)stopwatch.ElapsedMilliseconds
+                    };
                 }
 
-                if (string.IsNullOrEmpty(output))
+                var javacOutput = await javacOutputTask;
+                var javacError = await javacErrorTask;
+
+                if (javacProcess.ExitCode != 0)
                 {
-                    output = isSuccess ? "(Chương trình chạy thành công, không có output)" : "(Chương trình lỗi, không có output)";
+                    return new CompileResult
+                    {
+                        Success = false,
+                        Output = "[LỖI BIÊN DỊCH]\n" + (!string.IsNullOrEmpty(javacError) ? javacError : javacOutput),
+                        DurationMs = (int)stopwatch.ElapsedMilliseconds
+                    };
+                }
+
+                // 5. Chạy mã nguồn Java đã biên dịch (gọi java -cp bin Main)
+                var javaStartInfo = new ProcessStartInfo
+                {
+                    FileName = "java",
+                    Arguments = "-cp bin Main",
+                    WorkingDirectory = tempDir,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                };
+
+                using var javaProcess = Process.Start(javaStartInfo);
+                if (javaProcess == null)
+                {
+                    return new CompileResult
+                    {
+                        Success = false,
+                        Output = "Không thể khởi động môi trường thực thi `java`.",
+                        DurationMs = (int)stopwatch.ElapsedMilliseconds
+                    };
+                }
+
+                // Chờ thực thi chương trình (timeout 5s để chặn vòng lặp vô tận)
+                var javaOutputTask = javaProcess.StandardOutput.ReadToEndAsync();
+                var javaErrorTask = javaProcess.StandardError.ReadToEndAsync();
+
+                if (!javaProcess.WaitForExit(5000))
+                {
+                    javaProcess.Kill(true); // Kill process tree
+                    return new CompileResult
+                    {
+                        Success = false,
+                        Output = "[LỖI CHƯƠNG TRÌNH]\nQuá thời gian thực thi (Bị ngắt sau 5 giây để tránh vòng lặp vô hạn).",
+                        DurationMs = (int)stopwatch.ElapsedMilliseconds
+                    };
+                }
+
+                stopwatch.Stop();
+                var javaOutput = await javaOutputTask;
+                var javaError = await javaErrorTask;
+
+                var finalOutput = string.Empty;
+                if (!string.IsNullOrEmpty(javaError))
+                {
+                    finalOutput += "[LỖI CHƯƠNG TRÌNH (RUNTIME)]\n" + javaError + "\n";
+                }
+                if (!string.IsNullOrEmpty(javaOutput))
+                {
+                    finalOutput += javaOutput;
+                }
+
+                if (string.IsNullOrEmpty(finalOutput))
+                {
+                    finalOutput = javaProcess.ExitCode == 0 
+                        ? "(Chương trình chạy thành công, không có output)" 
+                        : $"(Chương trình kết thúc với mã lỗi {javaProcess.ExitCode})";
                 }
 
                 return new CompileResult
                 {
-                    Success = isSuccess,
-                    Output = output,
+                    Success = javaProcess.ExitCode == 0,
+                    Output = finalOutput,
                     DurationMs = (int)stopwatch.ElapsedMilliseconds
                 };
             }
             catch (Exception ex)
             {
                 stopwatch.Stop();
-                _logger.LogError(ex, "Lỗi xảy ra khi gọi Wandbox API");
+                _logger.LogError(ex, "Lỗi xảy ra trong quá trình biên dịch và chạy Java nội bộ.");
                 return new CompileResult
                 {
                     Success = false,
-                    Output = $"Lỗi kết nối tới server biên dịch Wandbox: {ex.Message}",
+                    Output = $"Lỗi hệ thống biên dịch nội bộ: {ex.Message}",
                     DurationMs = (int)stopwatch.ElapsedMilliseconds
                 };
+            }
+            finally
+            {
+                // Dọn dẹp thư mục tạm
+                try
+                {
+                    if (Directory.Exists(tempDir))
+                    {
+                        Directory.Delete(tempDir, true);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, $"Không thể xóa thư mục tạm: {tempDir}");
+                }
             }
         }
     }
@@ -161,47 +259,5 @@ namespace JavaIdeMini.Services
 
         [JsonPropertyName("content")]
         public string Content { get; set; } = string.Empty;
-    }
-
-    internal class WandboxRequest
-    {
-        [JsonPropertyName("compiler")]
-        public string Compiler { get; set; } = "openjdk-jdk-21+35";
-
-        [JsonPropertyName("code")]
-        public string Code { get; set; } = string.Empty;
-
-        [JsonPropertyName("codes")]
-        public WandboxFile[] Codes { get; set; } = Array.Empty<WandboxFile>();
-
-        [JsonPropertyName("compiler-option-raw")]
-        public string CompilerOptionRaw { get; set; } = string.Empty;
-    }
-
-    internal class WandboxFile
-    {
-        [JsonPropertyName("file")]
-        public string File { get; set; } = string.Empty;
-
-        [JsonPropertyName("code")]
-        public string Code { get; set; } = string.Empty;
-    }
-
-    internal class WandboxResponse
-    {
-        [JsonPropertyName("status")]
-        public int Status { get; set; }
-
-        [JsonPropertyName("compiler_output")]
-        public string? CompilerOutput { get; set; }
-
-        [JsonPropertyName("compiler_error")]
-        public string? CompilerError { get; set; }
-
-        [JsonPropertyName("program_output")]
-        public string? ProgramOutput { get; set; }
-
-        [JsonPropertyName("program_error")]
-        public string? ProgramError { get; set; }
     }
 }

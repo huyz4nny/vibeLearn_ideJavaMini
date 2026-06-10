@@ -31,6 +31,11 @@ RUN dotnet publish "testVibeCode.csproj" -c Release -o /app/publish /p:UseAppHos
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS final
 WORKDIR /app
 
+# Cài đặt OpenJDK 17 để biên dịch và chạy code tự thân trên server (Railway)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends openjdk-17-jdk-headless && \
+    rm -rf /var/lib/apt/lists/*
+
 # Khai báo port mà container sẽ listen (80 cho HTTP và 443 cho HTTPS)
 EXPOSE 80
 EXPOSE 443

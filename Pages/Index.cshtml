@@ -202,7 +202,7 @@
             </div>
         </div>
 
-        <!-- CENTER WORKSPACE: Monaco Editor & Sidebar File Explorer -->
+        <!-- CENTER WORKSPACE: Monaco Editor, Sidebar File Explorer & Terminal with Split Resizers -->
         <div class="flex-grow flex relative min-h-[300px] overflow-hidden">
             @if (!isAuthenticated)
             {
@@ -223,9 +223,9 @@
             }
             
             <!-- Project File Explorer (Left Panel) -->
-            <div class="w-64 border-r border-gray-900 bg-gray-950/10 flex flex-col shrink-0">
+            <div id="left-file-panel" class="border-r border-gray-900 bg-gray-950/10 flex flex-col shrink-0" style="width: 240px; min-w: 160px; max-w: 480px;">
                 <div class="p-3 border-b border-gray-900/60 flex items-center justify-between text-xs select-none">
-                    <span class="font-bold text-gray-400 uppercase tracking-wider text-[10px]">Tệp tin dự án (OOP)</span>
+                    <span class="font-bold text-gray-400 uppercase tracking-wider text-[10px]">Cây thư mục (NetBeans)</span>
                     @if (isAuthenticated)
                     {
                         <button onclick="addNewProjectFile()" class="p-1 hover:bg-gray-900 text-gray-400 hover:text-white rounded transition flex items-center justify-center w-5 h-5 font-bold" title="Tạo tệp Java mới">
@@ -239,32 +239,41 @@
                 </div>
             </div>
             
-            <!-- Editor (Right Panel) -->
-            <div class="flex-grow relative h-full">
-                <div id="editor-container" class="absolute inset-0 w-full h-full"></div>
-            </div>
-        </div>
-
-        <!-- BOTTOM TERMINAL: Simulating Terminal Output -->
-        <div class="h-60 shrink-0 border-t border-gray-900 bg-gray-950 flex flex-col">
-            <!-- Terminal Header -->
-            <div class="bg-gray-950/80 px-4 py-2 border-b border-gray-900/60 flex items-center justify-between text-xs text-gray-500 select-none">
-                <div class="flex items-center gap-2">
-                    <span class="w-2.5 h-2.5 rounded-full bg-red-500/60"></span>
-                    <span class="w-2.5 h-2.5 rounded-full bg-yellow-500/60"></span>
-                    <span class="w-2.5 h-2.5 rounded-full bg-green-500/60"></span>
-                    <span class="ml-2 font-bold uppercase tracking-wider text-[10px] text-gray-400">Kết quả chạy code (Terminal)</span>
-                </div>
-                <div class="flex items-center gap-4 text-[10px]">
-                    <span id="terminal-timer" class="hidden">Thời gian: -- ms</span>
-                    <button onclick="clearTerminal()" class="hover:text-gray-300 transition">Xóa Terminal</button>
-                </div>
-            </div>
+            <!-- Vertical Resizer Bar (Splitter) -->
+            <div id="vertical-resizer" class="w-1.5 hover:bg-violet-600/50 bg-gray-900/60 cursor-col-resize transition-colors shrink-0 z-20"></div>
             
-            <!-- Terminal Output Area -->
-            <div class="flex-grow p-4 overflow-y-auto bg-black text-emerald-400 code-font text-xs leading-relaxed whitespace-pre-wrap select-text selection:bg-violet-600 selection:text-white" id="terminal-output">
+            <!-- Right Panel (Editor + Bottom Terminal) -->
+            <div class="flex-grow flex flex-col min-w-0 h-full relative">
+                <!-- Editor (Top Panel) -->
+                <div class="flex-grow relative min-h-[100px] w-full">
+                    <div id="editor-container" class="absolute inset-0 w-full h-full"></div>
+                </div>
+                
+                <!-- Horizontal Resizer Bar (Splitter) -->
+                <div id="horizontal-resizer" class="h-1.5 hover:bg-violet-600/50 bg-gray-900/60 cursor-row-resize transition-colors shrink-0 z-20"></div>
+                
+                <!-- BOTTOM TERMINAL: Simulating Terminal Output -->
+                <div id="bottom-terminal-panel" class="shrink-0 bg-gray-950 flex flex-col w-full" style="height: 180px; min-height: 80px; max-height: 400px;">
+                    <!-- Terminal Header -->
+                    <div class="bg-gray-950/80 px-4 py-2 border-b border-gray-900/60 flex items-center justify-between text-xs text-gray-500 select-none">
+                        <div class="flex items-center gap-2">
+                            <span class="w-2.5 h-2.5 rounded-full bg-red-500/60"></span>
+                            <span class="w-2.5 h-2.5 rounded-full bg-yellow-500/60"></span>
+                            <span class="w-2.5 h-2.5 rounded-full bg-green-500/60"></span>
+                            <span class="ml-2 font-bold uppercase tracking-wider text-[10px] text-gray-400">Kết quả chạy code (Terminal - JDK 17)</span>
+                        </div>
+                        <div class="flex items-center gap-4 text-[10px]">
+                            <span id="terminal-timer" class="hidden">Thời gian: -- ms</span>
+                            <button onclick="clearTerminal()" class="hover:text-gray-300 transition">Xóa Terminal</button>
+                        </div>
+                    </div>
+                    
+                    <!-- Terminal Output Area -->
+                    <div class="flex-grow p-4 overflow-y-auto bg-black text-emerald-400 code-font text-xs leading-relaxed whitespace-pre-wrap select-text selection:bg-violet-600 selection:text-white" id="terminal-output">
 # Vui lòng bấm nút "▶ Chạy" ở trên để thực thi code.
-# Hạn mức quota của bạn sẽ được bảo vệ bởi middleware rate-limiting.
+# Hệ thống sẽ biên dịch nội bộ bằng trình biên dịch JDK 17 của máy chủ.
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -298,6 +307,10 @@
         // Project files management
         let projectFiles = [];
         let activeFilePath = "Main.java";
+        const isAuthed = @(isAuthenticated ? "true" : "false");
+
+        // State to keep track of collapsed folders: folderPath -> boolean
+        let collapsedFolders = {};
 
         // Initialize projectFiles from hidden textarea
         try {
@@ -311,47 +324,116 @@
             activeFilePath = "Main.java";
         }
 
+        // Build a hierarchical tree of files from projectFiles list
+        function buildFileTree(files) {
+            const root = { name: "src", type: "folder", children: {}, path: "" };
+            
+            files.forEach(file => {
+                const parts = file.path.split('/');
+                let current = root;
+                let currentPath = "";
+                
+                parts.forEach((part, index) => {
+                    currentPath = currentPath ? currentPath + "/" + part : part;
+                    const isLast = index === parts.length - 1;
+                    
+                    if (isLast) {
+                        current.children[part] = { name: part, type: "file", path: file.path };
+                    } else {
+                        if (!current.children[part]) {
+                            current.children[part] = { name: part, type: "folder", children: {}, path: currentPath };
+                        }
+                        current = current.children[part];
+                    }
+                });
+            });
+            return root;
+        }
+
+        // Recursive tree node rendering
+        function renderTreeNode(node, depth = 0) {
+            let html = '';
+            
+            // Sắp xếp thư mục trước, file sau
+            const keys = Object.keys(node.children || {}).sort((a, b) => {
+                const typeA = node.children[a].type;
+                const typeB = node.children[b].type;
+                if (typeA !== typeB) {
+                    return typeA === 'folder' ? -1 : 1;
+                }
+                return a.localeCompare(b);
+            });
+            
+            keys.forEach(key => {
+                const child = node.children[key];
+                const paddingLeft = depth * 12 + 8; // Thụt lề theo độ sâu của thư mục
+                
+                if (child.type === 'folder') {
+                    const isCollapsed = collapsedFolders[child.path] === true;
+                    const icon = isCollapsed ? '📁' : '📂';
+                    const chevron = isCollapsed ? '▶' : '▼';
+                    
+                    html += `
+                        <div class="group flex items-center justify-between p-1 rounded-lg text-xs hover:bg-gray-900/40 text-gray-300 select-none cursor-pointer" 
+                             style="padding-left: ${paddingLeft}px" 
+                             onclick="toggleFolder('${child.path.replace(/'/g, "\\'")}', event)">
+                            <div class="flex items-center gap-1.5 truncate">
+                                <span class="text-[8px] text-gray-500 w-3 text-center">${chevron}</span>
+                                <span class="text-violet-400 text-sm leading-none">${icon}</span>
+                                <span class="truncate font-semibold text-gray-300" title="${child.path}">${child.name}</span>
+                            </div>
+                        </div>
+                    `;
+                    
+                    if (!isCollapsed) {
+                        html += renderTreeNode(child, depth + 1);
+                    }
+                } else {
+                    const isActive = child.path === activeFilePath;
+                    
+                    html += `
+                        <div class="group flex items-center justify-between p-1 rounded-lg text-xs cursor-pointer transition duration-150 border select-none ${
+                            isActive 
+                                ? 'bg-violet-950/20 text-violet-400 border-violet-500/20 font-semibold' 
+                                : 'text-gray-400 hover:bg-gray-900/50 hover:text-gray-200 border-transparent'
+                        }"
+                             style="padding-left: ${paddingLeft + 15}px" 
+                             onclick="switchActiveFile('${child.path.replace(/'/g, "\\'")}')">
+                            <div class="flex items-center gap-2 truncate pr-1">
+                                <span class="text-gray-500 text-xs">📄</span>
+                                <span class="truncate" title="${child.path}">${child.name}</span>
+                            </div>
+                            
+                            <!-- Nút xóa (Không thể xóa Main.java) -->
+                            ${ (child.path !== 'Main.java' && isAuthed) ? `
+                                <button class="opacity-0 group-hover:opacity-100 p-0.5 hover:text-red-400 text-gray-500 rounded transition shrink-0 font-bold text-sm leading-none"
+                                        title="Xóa tệp" 
+                                        onclick="event.stopPropagation(); deleteProjectFile('${child.path.replace(/'/g, "\\'")}')">
+                                    ×
+                                </button>
+                            ` : '' }
+                        </div>
+                    `;
+                }
+            });
+            
+            return html;
+        }
+
+        // Toggle folder collapse state
+        function toggleFolder(folderPath, event) {
+            if (event) event.stopPropagation();
+            collapsedFolders[folderPath] = !collapsedFolders[folderPath];
+            renderFileList();
+        }
+
         // Render project file list
         function renderFileList() {
             const listContainer = document.getElementById('project-files-list');
             if (!listContainer) return;
-            listContainer.innerHTML = '';
             
-            projectFiles.forEach((file) => {
-                const isActive = file.path === activeFilePath;
-                
-                const item = document.createElement('div');
-                item.className = `group flex items-center justify-between p-2 rounded-xl cursor-pointer text-xs transition duration-150 border ${
-                    isActive 
-                        ? 'bg-violet-950/20 text-violet-400 border-violet-500/20 font-semibold' 
-                        : 'text-gray-400 hover:bg-gray-900/50 hover:text-gray-200 border-transparent'
-                }`;
-                item.setAttribute('onclick', `switchActiveFile("${file.path.replace(/"/g, '&quot;')}")`);
-                
-                const infoDiv = document.createElement('div');
-                infoDiv.className = 'flex items-center gap-2 truncate pr-2';
-                
-                const isSubfolder = file.path.includes('/');
-                const icon = isSubfolder ? '📂' : '📄';
-                
-                infoDiv.innerHTML = `<span>${icon}</span><span class="truncate" title="${file.path}">${file.path}</span>`;
-                item.appendChild(infoDiv);
-                
-                const isAuthed = @(isAuthenticated ? "true" : "false");
-                if (isAuthed && file.path !== 'Main.java') {
-                    const deleteBtn = document.createElement('button');
-                    deleteBtn.className = 'opacity-0 group-hover:opacity-100 p-0.5 hover:text-red-400 text-gray-500 rounded transition shrink-0 font-bold text-sm';
-                    deleteBtn.innerHTML = '×';
-                    deleteBtn.title = 'Xóa tệp';
-                    deleteBtn.onclick = (e) => {
-                        e.stopPropagation();
-                        deleteProjectFile(file.path);
-                    };
-                    item.appendChild(deleteBtn);
-                }
-                
-                listContainer.appendChild(item);
-            });
+            const tree = buildFileTree(projectFiles);
+            listContainer.innerHTML = renderTreeNode(tree, 0);
         }
 
         // Switch active file in Monaco
@@ -457,6 +539,61 @@
             }
         }
 
+        // Resizer panels dragging logic
+        function initResizers() {
+            const vResizer = document.getElementById('vertical-resizer');
+            const leftPanel = document.getElementById('left-file-panel');
+            
+            const hResizer = document.getElementById('horizontal-resizer');
+            const bottomPanel = document.getElementById('bottom-terminal-panel');
+            
+            if (vResizer && leftPanel) {
+                vResizer.addEventListener('mousedown', function(e) {
+                    e.preventDefault();
+                    const startX = e.clientX;
+                    const startWidth = leftPanel.getBoundingClientRect().width;
+                    
+                    function onMouseMove(e) {
+                        const dx = e.clientX - startX;
+                        const newWidth = Math.max(160, Math.min(480, startWidth + dx));
+                        leftPanel.style.width = newWidth + 'px';
+                        if (editor) editor.layout();
+                    }
+                    
+                    function onMouseUp() {
+                        document.removeEventListener('mousemove', onMouseMove);
+                        document.removeEventListener('mouseup', onMouseUp);
+                    }
+                    
+                    document.addEventListener('mousemove', onMouseMove);
+                    document.addEventListener('mouseup', onMouseUp);
+                });
+            }
+            
+            if (hResizer && bottomPanel) {
+                hResizer.addEventListener('mousedown', function(e) {
+                    e.preventDefault();
+                    const startY = e.clientY;
+                    const startHeight = bottomPanel.getBoundingClientRect().height;
+                    
+                    function onMouseMove(e) {
+                        const dy = e.clientY - startY;
+                        const newHeight = Math.max(80, Math.min(400, startHeight - dy));
+                        bottomPanel.style.height = newHeight + 'px';
+                        if (editor) editor.layout();
+                    }
+                    
+                    function onMouseUp() {
+                        document.removeEventListener('mousemove', onMouseMove);
+                        document.removeEventListener('mouseup', onMouseUp);
+                    }
+                    
+                    document.addEventListener('mousemove', onMouseMove);
+                    document.addEventListener('mouseup', onMouseUp);
+                });
+            }
+        }
+
         // Initialize Monaco Editor
         let editor;
         require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.39.0/min/vs' } });
@@ -474,10 +611,17 @@
                 roundedSelection: true,
                 cursorBlinking: "smooth",
                 cursorSmoothCaretAnimation: "on",
-                readOnly: @(isAuthenticated ? "false" : "true")
+                readOnly: @(isAuthenticated ? "false" : "true"),
+                
+                // Tắt hoàn toàn gợi ý code tự động theo yêu cầu của user
+                quickSuggestions: false,
+                suggestOnTriggerCharacters: false,
+                wordBasedSuggestions: false,
+                parameterHints: { enabled: false }
             });
 
             renderFileList();
+            initResizers();
         });
 
         // Load code from History click
@@ -540,7 +684,7 @@
             const timer = document.getElementById('terminal-timer');
             const runBtn = document.getElementById('run-btn');
 
-            terminal.textContent = "Đang biên dịch và chạy ứng dụng Java...\n";
+            terminal.textContent = "Đang biên dịch và chạy ứng dụng Java nội bộ...\n";
             terminal.className = "flex-grow p-4 overflow-y-auto bg-black text-yellow-500 code-font text-xs leading-relaxed whitespace-pre-wrap select-text";
             timer.classList.add('hidden');
             runBtn.disabled = true;

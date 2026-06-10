@@ -117,7 +117,7 @@ app.MapPost("/api/run", async (
         return Results.Json(new { message = "Mã nguồn không được để trống." }, statusCode: StatusCodes.Status400BadRequest);
     }
 
-    // Biên dịch và chạy code Java thông qua Wandbox API
+    // Biên dịch và chạy code Java thông qua CompilerService (JDK 17 nội bộ)
     var result = await compilerService.ExecuteJavaCodeAsync(filesToCompile);
 
     // Serialize danh sách file để lưu vào lịch sử chạy

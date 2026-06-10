@@ -73,18 +73,21 @@
         </div>
     </div>
 
-    <!-- WORKSPACE: Monaco Editor & Sidebar File Explorer (Read-Only) -->
+    <!-- WORKSPACE: Monaco Editor & Sidebar File Explorer (Read-Only) with Split Resizer -->
     <div class="flex-grow flex relative overflow-hidden">
         <!-- Project File Explorer (Left Panel) -->
-        <div class="w-64 border-r border-gray-900 bg-gray-950/10 flex flex-col shrink-0">
+        <div id="left-file-panel" class="border-r border-gray-900 bg-gray-950/10 flex flex-col shrink-0" style="width: 240px; min-w: 160px; max-w: 480px;">
             <div class="p-3 border-b border-gray-900/60 flex items-center justify-between text-xs select-none">
-                <span class="font-bold text-gray-400 uppercase tracking-wider text-[10px]">Cấu trúc dự án (OOP)</span>
+                <span class="font-bold text-gray-400 uppercase tracking-wider text-[10px]">Cây thư mục (NetBeans)</span>
             </div>
             <!-- File list container -->
             <div id="project-files-list" class="flex-grow overflow-y-auto p-2 space-y-1 select-none">
                 <!-- Sẽ render động qua JS -->
             </div>
         </div>
+        
+        <!-- Vertical Resizer Bar (Splitter) -->
+        <div id="vertical-resizer" class="w-1.5 hover:bg-violet-600/50 bg-gray-900/60 cursor-col-resize transition-colors shrink-0 z-20"></div>
         
         <!-- Editor (Right Panel) -->
         <div class="flex-grow relative h-full">
@@ -104,6 +107,9 @@
         let projectFiles = [];
         let activeFilePath = "Main.java";
 
+        // State to keep track of collapsed folders: folderPath -> boolean
+        let collapsedFolders = {};
+
         // Initialize projectFiles from hidden textarea
         try {
             const rawData = document.getElementById('hidden-project-data').value;
@@ -116,34 +122,107 @@
             activeFilePath = "Main.java";
         }
 
+        // Build a hierarchical tree of files from projectFiles list
+        function buildFileTree(files) {
+            const root = { name: "src", type: "folder", children: {}, path: "" };
+            
+            files.forEach(file => {
+                const parts = file.path.split('/');
+                let current = root;
+                let currentPath = "";
+                
+                parts.forEach((part, index) => {
+                    currentPath = currentPath ? currentPath + "/" + part : part;
+                    const isLast = index === parts.length - 1;
+                    
+                    if (isLast) {
+                        current.children[part] = { name: part, type: "file", path: file.path };
+                    } else {
+                        if (!current.children[part]) {
+                            current.children[part] = { name: part, type: "folder", children: {}, path: currentPath };
+                        }
+                        current = current.children[part];
+                    }
+                });
+            });
+            return root;
+        }
+
+        // Recursive tree node rendering (Read-only, no delete button)
+        function renderTreeNode(node, depth = 0) {
+            let html = '';
+            
+            // Sắp xếp thư mục trước, file sau
+            const keys = Object.keys(node.children || {}).sort((a, b) => {
+                const typeA = node.children[a].type;
+                const typeB = node.children[b].type;
+                if (typeA !== typeB) {
+                    return typeA === 'folder' ? -1 : 1;
+                }
+                return a.localeCompare(b);
+            });
+            
+            keys.forEach(key => {
+                const child = node.children[key];
+                const paddingLeft = depth * 12 + 8; // Thụt lề theo độ sâu
+                
+                if (child.type === 'folder') {
+                    const isCollapsed = collapsedFolders[child.path] === true;
+                    const icon = isCollapsed ? '📁' : '📂';
+                    const chevron = isCollapsed ? '▶' : '▼';
+                    
+                    html += `
+                        <div class="group flex items-center justify-between p-1 rounded-lg text-xs hover:bg-gray-900/40 text-gray-300 select-none cursor-pointer" 
+                             style="padding-left: ${paddingLeft}px" 
+                             onclick="toggleFolder('${child.path.replace(/'/g, "\\'")}', event)">
+                            <div class="flex items-center gap-1.5 truncate">
+                                <span class="text-[8px] text-gray-500 w-3 text-center">${chevron}</span>
+                                <span class="text-violet-400 text-sm leading-none">${icon}</span>
+                                <span class="truncate font-semibold text-gray-300" title="${child.path}">${child.name}</span>
+                            </div>
+                        </div>
+                    `;
+                    
+                    if (!isCollapsed) {
+                        html += renderTreeNode(child, depth + 1);
+                    }
+                } else {
+                    const isActive = child.path === activeFilePath;
+                    
+                    html += `
+                        <div class="group flex items-center justify-between p-1 rounded-lg text-xs cursor-pointer transition duration-150 border select-none ${
+                            isActive 
+                                ? 'bg-violet-950/20 text-violet-400 border-violet-500/20 font-semibold' 
+                                : 'text-gray-400 hover:bg-gray-900/50 hover:text-gray-200 border-transparent'
+                        }"
+                             style="padding-left: ${paddingLeft + 15}px" 
+                             onclick="switchActiveFile('${child.path.replace(/'/g, "\\'")}')">
+                            <div class="flex items-center gap-2 truncate pr-1">
+                                <span class="text-gray-500 text-xs">📄</span>
+                                <span class="truncate" title="${child.path}">${child.name}</span>
+                            </div>
+                        </div>
+                    `;
+                }
+            });
+            
+            return html;
+        }
+
+        // Toggle folder collapse state
+        function toggleFolder(folderPath, event) {
+            if (event) event.stopPropagation();
+            collapsedFolders[folderPath] = !collapsedFolders[folderPath];
+            renderFileList();
+        }
+
         // Render project file list
         function renderFileList() {
             const listContainer = document.getElementById('project-files-list');
             if (!listContainer) return;
-            listContainer.innerHTML = '';
             
-            projectFiles.forEach((file) => {
-                const isActive = file.path === activeFilePath;
-                
-                const item = document.createElement('div');
-                item.className = `group flex items-center justify-between p-2 rounded-xl cursor-pointer text-xs transition duration-150 border ${
-                    isActive 
-                        ? 'bg-violet-950/20 text-violet-400 border-violet-500/20 font-semibold' 
-                        : 'text-gray-400 hover:bg-gray-900/50 hover:text-gray-200 border-transparent'
-                }`;
-                item.setAttribute('onclick', `switchActiveFile("${file.path.replace(/"/g, '&quot;')}")`);
-                
-                const infoDiv = document.createElement('div');
-                infoDiv.className = 'flex items-center gap-2 truncate pr-2';
-                
-                const isSubfolder = file.path.includes('/');
-                const icon = isSubfolder ? '📂' : '📄';
-                
-                infoDiv.innerHTML = `<span>${icon}</span><span class="truncate" title="${file.path}">${file.path}</span>`;
-                item.appendChild(infoDiv);
-                
-                listContainer.appendChild(item);
-            });
+            const tree = buildFileTree(projectFiles);
+            listContainer.innerHTML = renderTreeNode(tree, 0);
         }
 
         // Switch active file in Monaco
@@ -157,6 +236,35 @@
             }
             
             renderFileList();
+        }
+
+        // Resizer panels dragging logic
+        function initResizers() {
+            const vResizer = document.getElementById('vertical-resizer');
+            const leftPanel = document.getElementById('left-file-panel');
+            
+            if (vResizer && leftPanel) {
+                vResizer.addEventListener('mousedown', function(e) {
+                    e.preventDefault();
+                    const startX = e.clientX;
+                    const startWidth = leftPanel.getBoundingClientRect().width;
+                    
+                    function onMouseMove(e) {
+                        const dx = e.clientX - startX;
+                        const newWidth = Math.max(160, Math.min(480, startWidth + dx));
+                        leftPanel.style.width = newWidth + 'px';
+                        if (editor) editor.layout();
+                    }
+                    
+                    function onMouseUp() {
+                        document.removeEventListener('mousemove', onMouseMove);
+                        document.removeEventListener('mouseup', onMouseUp);
+                    }
+                    
+                    document.addEventListener('mousemove', onMouseMove);
+                    document.addEventListener('mouseup', onMouseUp);
+                });
+            }
         }
 
         // Initialize Monaco Editor
@@ -175,10 +283,17 @@
                 minimap: { enabled: false },
                 readOnly: true, // Chế độ chỉ đọc
                 domReadOnly: true,
-                cursorBlinking: "solid"
+                cursorBlinking: "solid",
+                
+                // Tắt hoàn toàn gợi ý code theo yêu cầu của user
+                quickSuggestions: false,
+                suggestOnTriggerCharacters: false,
+                wordBasedSuggestions: false,
+                parameterHints: { enabled: false }
             });
 
             renderFileList();
+            initResizers();
         });
 
         // Copy Share Link Function
